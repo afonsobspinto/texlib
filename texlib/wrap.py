@@ -36,9 +36,8 @@ Reference:
     chapter 3 of _Digital Typography_, CSLI Lecture Notes #78.
 """
 
-from __future__ import print_function
-
-import sys
+import sys, string
+import UserList
 
 __version__ = "1.01"
 
@@ -124,7 +123,7 @@ class _BreakNode:
     def __repr__(self):
         return '<_BreakNode at %i>' % self.position
 
-class ObjectList(list):
+class ObjectList(UserList.UserList):
 
     """Class representing a list of Box, Glue, and Penalty objects.
     Supports the same methods as regular Python lists.
@@ -132,6 +131,10 @@ class ObjectList(list):
 
     # Set this to 1 to trace the execution of the algorithm.
     debug = 0
+    feasible_breakpoints = []
+
+    def get_feasible_breakpoints (self):
+        return self.feasible_breakpoints
 
     def add_closing_penalty (self):
         "Add the standard glue and penalty for the end of a paragraph"
@@ -139,8 +142,8 @@ class ObjectList(list):
         self.append( Glue(0, INFINITY, 0) )
         self.append( Penalty(0, -INFINITY, 1) )
 
-    def is_feasible_breakpoint(self, i):
-        "Return true if position 'i' is a feasible breakpoint."
+    def is_legal_breakpoint(self, i):
+        "Return true if position 'i' is a legal breakpoint."
 
         box = self[i]
         if box.is_penalty() and box.penalty < INFINITY:
@@ -179,7 +182,7 @@ class ObjectList(list):
         length = self.measure_width(pos1, pos2)
         if self[pos2].is_penalty(): length = length + self[pos2].width
         if self.debug:
-            print('\tline length=', length)
+            print '\tline length=', length
 
         # Get the length of the current line; if the line_lengths list
         # is too short, the last value is always used for subsequent
@@ -324,16 +327,16 @@ class ObjectList(list):
         active_nodes = [A]
 
         if self.debug:
-            print('Looping over %i box objects' % m)
+            print 'Looping over %i box objects' % m
 
         for i in range(m):
             B = self[i]
-            # Determine if this box is a feasible breakpoint and
+            # Determine if this box is a legal breakpoint and
             # perform the main loop if it is.
-            if self.is_feasible_breakpoint(i):
+            if self.is_legal_breakpoint(i):
                  if self.debug:
-                     print('Feasible breakpoint at %i:' % i)
-                     print('\tCurrent active node list:', active_nodes)
+                     print 'legal breakpoint at %i:' % i
+                     print '\tCurrent active node list:', active_nodes
 
                  if self.debug:
                      # Print the list of active nodes, sorting them
@@ -342,17 +345,17 @@ class ObjectList(list):
                          return cmp( (n1.line, n1.position, n1.fitness_class),
                                      (n2.line, n2.position, n2.fitness_class) )
                      active_nodes.sort(cmp_f)
-                     for A in active_nodes: print(A.position, A.line, A.fitness_class)
+                     for A in active_nodes: print A.position, A.line, A.fitness_class
                      print ; print
 
                  # Loop over the list of active nodes, and compute the fitness
                  # of the line formed by breaking at A and B.  The resulting
-                 breaks = []                 # List of feasible breaks
+                 breaks = []                 # List of legal breaks
                  for A in active_nodes[:]:
                      r = self.compute_adjustment_ratio(A.position, i, A.line, line_lengths)
                      if self.debug:
-                         print('\tr=', r)
-                         print('\tline=', A.line)
+                         print '\tr=', r
+                         print '\tline=', A.line
 
                      # XXX is 'or' really correct here?  This seems to
                      # remove all active nodes on encountering a forced break!
@@ -360,22 +363,23 @@ class ObjectList(list):
                          # Deactivate node A
                          if len(active_nodes) == 1:
                              if self.debug:
-                                 print("Can't remove last node!")
+                                 print "Can't remove last node!"
                                  # XXX how should this be handled?
                                  # Raise an exception?
                          else:
                              if self.debug:
-                                 print('\tRemoving node', A)
+                                 print '\tRemoving node', A
                              active_nodes.remove(A)
 
                      if -1 <= r <= tolerance:
+                         self.feasible_breakpoints.append(i)
                          # Compute demerits and fitness class
                          if p[i] >= 0:
-                             demerits = (1 + 100 * abs(r)**3 + p[i]) ** 3
+                             demerits = (1 + 100 * abs(r)**3L + p[i]) ** 3L
                          elif self.is_forced_break(i):
-                              demerits = (1 + 100 * abs(r)**3) ** 2 - p[i]**2
+                              demerits = (1 + 100 * abs(r)**3L) ** 2L - p[i]**2L
                          else:
-                             demerits = (1 + 100 * abs(r)**3) ** 2
+                             demerits = (1 + 100 * abs(r)**3L) ** 2L
 
                          demerits = demerits + (flagged_demerit * f[i] *
                                                 f[A.position])
@@ -394,10 +398,10 @@ class ObjectList(list):
                              demerits = demerits + fitness_demerit
 
                          if self.debug:
-                             print('\tDemerits=', demerits)
-                             print('\tFitness class=', fitness_class)
+                             print '\tDemerits=', demerits
+                             print '\tFitness class=', fitness_class
 
-                         # Record a feasible break from A to B
+                         # Record a legal break from A to B
                          brk = _BreakNode(position = i, line = A.line + 1,
                                        fitness_class = fitness_class,
                                        totalwidth = self.sum_width[i],
@@ -407,25 +411,27 @@ class ObjectList(list):
                                        previous = A)
                          breaks.append(brk)
                          if self.debug:
-                             print('\tRecording feasible break', B)
-                             print('\t\tDemerits=', demerits)
-                             print('\t\tFitness class=', fitness_class)
+                             print '\tRecording legal break', B
+                             print '\t\tDemerits=', demerits
+                             print '\t\tFitness class=', fitness_class
 
                  # end for A in active_nodes
                  if breaks:
                      if self.debug:
-                         print('List of breaks at ', i, ':', breaks)
+                         print 'List of breaks at ', i, ':', breaks
                      for brk in breaks:
                          self.add_active_node(active_nodes, brk)
-            # end if self.feasible_breakpoint()
+            # end if self.legal_breakpoint()
         # end for i in range(m)
 
         if self.debug:
-            print('Main loop completed')
-            print( 'Active nodes=', active_nodes)
+            print 'Main loop completed'
+            print 'Active nodes=', active_nodes
 
         # Find the active node with the lowest number of demerits.
-        A = min(active_nodes, key=lambda A: A.demerits)
+        L = map(lambda A: (A.demerits, A), active_nodes)
+        L.sort()
+        _, A = L[0]
 
         if looseness != 0:
             # The search for the appropriate active node is a bit more
@@ -479,7 +485,7 @@ if __name__ == '__main__':
     concatenation of several input strings.  The algorithm is not
     cryptographically strong, and should not be used for
     authentication or digital signatures."""
-    text = ' '.join(text.split())
+    text = string.join( string.split(text) )
 
     line_width = 100                    # Line width to use for formatting
     full_justify = 0                    # Boolean; if true, do full justification
@@ -506,7 +512,7 @@ if __name__ == '__main__':
     line_lengths = range(120, 20, -10)
     breaks = L.compute_breakpoints( line_lengths,
                                     tolerance = 2)
-    print(breaks, len(L))
+    print breaks, len(L)
 
     assert breaks[0] == 0
     line_start = 0
